@@ -13,6 +13,7 @@ public sealed class VoiceTransport : IDisposable
     private readonly CancellationTokenSource _cts = new();
     private Task? _receiveTask;
     private IPEndPoint? _remoteEndpoint;
+    private IPEndPoint? _localRemoteEndpoint;
     private bool _isConnected = false;
 
     /// <summary>
@@ -47,19 +48,11 @@ public sealed class VoiceTransport : IDisposable
     /// Connects to the remote peer, punches a hole, and starts listening for voice frames.
     /// This should be called by BOTH sides simultaneously after MQTT negotiation.
     /// </summary>
-    public async Task ConnectAndPunchHoleAsync(IPEndPoint remoteEndpoint)
+    public async Task ConnectAndPunchHoleAsync(IPEndPoint remoteEndpoint, IPEndPoint? localRemoteEndpoint)
     {
-        if (_udp.Client.AddressFamily == AddressFamily.InterNetwork && remoteEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6)
-        {
-            if (remoteEndpoint.Address.IsIPv4MappedToIPv6)
-                remoteEndpoint = new IPEndPoint(remoteEndpoint.Address.MapToIPv4(), remoteEndpoint.Port);
-        }
-        else if (_udp.Client.AddressFamily == AddressFamily.InterNetworkV6 && remoteEndpoint.Address.AddressFamily == AddressFamily.InterNetwork)
-        {
-            remoteEndpoint = new IPEndPoint(remoteEndpoint.Address.MapToIPv6(), remoteEndpoint.Port);
-        }
+        _remoteEndpoint = MapEndpoint(remoteEndpoint);
+        _localRemoteEndpoint = localRemoteEndpoint != null ? MapEndpoint(localRemoteEndpoint) : null;
         
-        _remoteEndpoint = remoteEndpoint;
         _isConnected = true;
 
         if (_receiveTask == null)
@@ -69,10 +62,25 @@ public sealed class VoiceTransport : IDisposable
         await PunchHoleAsync();
     }
 
+    private IPEndPoint MapEndpoint(IPEndPoint ep)
+    {
+        if (_udp.Client.AddressFamily == AddressFamily.InterNetwork && ep.Address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (ep.Address.IsIPv4MappedToIPv6)
+                return new IPEndPoint(ep.Address.MapToIPv4(), ep.Port);
+        }
+        else if (_udp.Client.AddressFamily == AddressFamily.InterNetworkV6 && ep.Address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            return new IPEndPoint(ep.Address.MapToIPv6(), ep.Port);
+        }
+        return ep;
+    }
+
     public void Disconnect()
     {
         _isConnected = false;
         _remoteEndpoint = null;
+        _localRemoteEndpoint = null;
     }
 
     /// <summary>
@@ -100,7 +108,16 @@ public sealed class VoiceTransport : IDisposable
                 var result = await _udp.ReceiveAsync(_cts.Token);
                 byte[] data = result.Buffer;
 
-                if (data.Length <= 1) continue; // Ignore hole-punch packets (1 byte)
+                if (data.Length <= 1)
+                {
+                    // If it's a hole-punch packet, lock onto this endpoint!
+                    if (result.RemoteEndPoint != null)
+                    {
+                        _remoteEndpoint = result.RemoteEndPoint;
+                        _localRemoteEndpoint = null; // Drop the other one
+                    }
+                    continue; 
+                }
 
                 // Deliver voice frame
                 if (_isConnected && _remoteEndpoint != null)
@@ -124,17 +141,18 @@ public sealed class VoiceTransport : IDisposable
     /// </summary>
     public async Task PunchHoleAsync()
     {
-        if (_remoteEndpoint == null) return;
-
         byte[] punch = new byte[] { 0x00 };
         for (int i = 0; i < 5; i++)
         {
-            try
+            if (_remoteEndpoint != null)
             {
-                await _udp.SendAsync(punch, punch.Length, _remoteEndpoint);
-                await Task.Delay(100);
+                try { await _udp.SendAsync(punch, punch.Length, _remoteEndpoint); } catch { }
             }
-            catch { }
+            if (_localRemoteEndpoint != null)
+            {
+                try { await _udp.SendAsync(punch, punch.Length, _localRemoteEndpoint); } catch { }
+            }
+            await Task.Delay(100);
         }
     }
 

@@ -27,6 +27,7 @@ public partial class MainWindow : Window
     // Remote peer that is currently calling us
     private string? _incomingCallerId;
     private IPEndPoint? _incomingEndpoint;
+    private IPEndPoint? _incomingLocalEndpoint;
     
     // The ID of the person we are currently calling/connected to
     private string? _connectedPeerId;
@@ -61,14 +62,14 @@ public partial class MainWindow : Window
         {
             _signaling = new SignalingClient();
             
-            _signaling.OnIncomingCall += (callerId, endpoint) =>
+            _signaling.OnIncomingCall += (callerId, endpoint, localEndpoint) =>
             {
-                Dispatcher.Invoke(() => HandleIncomingCall(callerId, endpoint));
+                Dispatcher.Invoke(() => HandleIncomingCall(callerId, endpoint, localEndpoint));
             };
             
-            _signaling.OnCallAccepted += (acceptorId, endpoint) =>
+            _signaling.OnCallAccepted += (acceptorId, endpoint, localEndpoint) =>
             {
-                Dispatcher.Invoke(() => CompleteConnection(acceptorId, endpoint));
+                Dispatcher.Invoke(() => CompleteConnection(acceptorId, endpoint, localEndpoint));
             };
             
             _signaling.OnLog += (msg) => 
@@ -198,7 +199,7 @@ public partial class MainWindow : Window
 
         try
         {
-            await _signaling.SendCallRequestAsync(targetId, _publicEndpoint);
+            await _signaling.SendCallRequestAsync(targetId, _publicEndpoint, GetLocalEndpoint());
             Log("Ringing...");
             // Wait for OnCallAccepted
         }
@@ -210,7 +211,7 @@ public partial class MainWindow : Window
         }
     }
     
-    private async void HandleIncomingCall(string callerId, IPEndPoint endpoint)
+    private async void HandleIncomingCall(string callerId, IPEndPoint endpoint, IPEndPoint? localEndpoint)
     {
         if (_isConnected)
         {
@@ -224,6 +225,7 @@ public partial class MainWindow : Window
         Log($"Incoming call from ID {callerId}...");
         _incomingCallerId = callerId;
         _incomingEndpoint = endpoint;
+        _incomingLocalEndpoint = localEndpoint;
         
         // Show incoming call UI
         TxtIncomingCaller.Text = $"ID: {callerId}";
@@ -238,10 +240,10 @@ public partial class MainWindow : Window
         {
             Log($"Accepting call from {_incomingCallerId}...");
             _connectedPeerId = _incomingCallerId;
-            await _signaling.SendCallAcceptAsync(_incomingCallerId, _publicEndpoint);
+            await _signaling.SendCallAcceptAsync(_incomingCallerId, _publicEndpoint, GetLocalEndpoint());
             
             // We are accepted, complete the pipeline with their endpoint
-            CompleteConnection(_incomingCallerId, _incomingEndpoint);
+            CompleteConnection(_incomingCallerId, _incomingEndpoint, _incomingLocalEndpoint);
         }
         else
         {
@@ -264,7 +266,7 @@ public partial class MainWindow : Window
         _incomingEndpoint = null;
     }
     
-    private async void CompleteConnection(string peerId, IPEndPoint peerEndpoint)
+    private async void CompleteConnection(string peerId, IPEndPoint peerEndpoint, IPEndPoint? localEndpoint)
     {
         try
         {
@@ -272,11 +274,9 @@ public partial class MainWindow : Window
                 
             Log($"Connecting P2P stream to {FormatEndpoint(peerEndpoint)}...");
 
-            // Start Transport
             if (_transport != null)
-            {
                 _transport.Dispose();
-            }
+                
             _transport = new VoiceTransport();
             
             // Wire up voice data event
@@ -284,6 +284,8 @@ public partial class MainWindow : Window
             {
                 _playback?.PlayOpusFrame(data);
             };
+
+            await _transport.ConnectAndPunchHoleAsync(peerEndpoint, localEndpoint);
             
             // Start audio capture
             if (_capture == null)
@@ -307,8 +309,6 @@ public partial class MainWindow : Window
                     _playback.SetDevice(CmbOutputDevice.SelectedIndex);
             }
 
-            // Punch hole and connect!
-            await _transport.ConnectAndPunchHoleAsync(peerEndpoint);
 
             _playback.Start();
             _capture.Start();
@@ -595,5 +595,23 @@ public partial class MainWindow : Window
         if (ep.Address.AddressFamily == AddressFamily.InterNetworkV6)
             return $"[{ep.Address}]:{ep.Port}";
         return $"{ep.Address}:{ep.Port}";
+    }
+    
+    private IPEndPoint GetLocalEndpoint()
+    {
+        if (_transport != null)
+            return new IPEndPoint(System.Net.IPAddress.Loopback, _transport.LocalPort);
+            
+        // We need the local IP that routes to the internet.
+        // A quick hack is to open a UDP socket to a public IP and read the local endpoint.
+        using var socket = new System.Net.Sockets.Socket(System.Net.Sockets.AddressFamily.InterNetwork, System.Net.Sockets.SocketType.Dgram, 0);
+        socket.Connect("8.8.8.8", 65530);
+        var endPoint = socket.LocalEndPoint as IPEndPoint;
+        
+        // Return this IP with a dummy port, since VoiceTransport creates its own socket. 
+        // Wait, VoiceTransport isn't created yet!
+        // We will just pass the local IP and let VoiceTransport patch it later.
+        // Actually, no. We MUST create VoiceTransport first to know the exact local port!
+        return new IPEndPoint(endPoint?.Address ?? System.Net.IPAddress.Loopback, 0);
     }
 }

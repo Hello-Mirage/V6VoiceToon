@@ -11,6 +11,7 @@ public class SignalingMessage
     public string Type { get; set; } = "";
     public string CallerId { get; set; } = "";
     public string Endpoint { get; set; } = "";
+    public string LocalEndpoint { get; set; } = "";
 }
 
 public class SignalingClient : IDisposable
@@ -19,8 +20,8 @@ public class SignalingClient : IDisposable
     private readonly string _myId;
     private readonly string _baseTopic = "v6voicetoon/users/";
 
-    public event Action<string, IPEndPoint>? OnIncomingCall;
-    public event Action<string, IPEndPoint>? OnCallAccepted;
+    public event Action<string, IPEndPoint, IPEndPoint?>? OnIncomingCall;
+    public event Action<string, IPEndPoint, IPEndPoint?>? OnCallAccepted;
     public event Action<string>? OnCallRejected;
     public event Action<string>? OnRemoteDisconnect;
     public event Action<string>? OnLog;
@@ -72,6 +73,8 @@ public class SignalingClient : IDisposable
             }
 
             IPEndPoint? endpoint = ParseEndpoint(msg.Endpoint);
+            IPEndPoint? localEndpoint = ParseEndpoint(msg.LocalEndpoint);
+            
             if (endpoint == null && !string.IsNullOrEmpty(msg.Endpoint))
             {
                 OnLog?.Invoke($"Warning: Could not parse endpoint '{msg.Endpoint}'");
@@ -81,12 +84,12 @@ public class SignalingClient : IDisposable
             {
                 case "CallRequest":
                     if (endpoint != null)
-                        OnIncomingCall?.Invoke(msg.CallerId, endpoint);
+                        OnIncomingCall?.Invoke(msg.CallerId, endpoint, localEndpoint);
                     break;
 
                 case "CallAccept":
                     if (endpoint != null)
-                        OnCallAccepted?.Invoke(msg.CallerId, endpoint);
+                        OnCallAccepted?.Invoke(msg.CallerId, endpoint, localEndpoint);
                     else
                         OnLog?.Invoke("CallAccept ignored: Endpoint is null.");
                     break;
@@ -112,23 +115,25 @@ public class SignalingClient : IDisposable
         return Task.CompletedTask;
     }
 
-    public async Task SendCallRequestAsync(string targetId, IPEndPoint myEndpoint)
+    public async Task SendCallRequestAsync(string targetId, IPEndPoint myEndpoint, IPEndPoint myLocalEndpoint)
     {
         await PublishMessageAsync(targetId, new SignalingMessage
         {
             Type = "CallRequest",
             CallerId = _myId,
-            Endpoint = FormatEndpoint(myEndpoint)
+            Endpoint = FormatEndpoint(myEndpoint),
+            LocalEndpoint = FormatEndpoint(myLocalEndpoint)
         });
     }
 
-    public async Task SendCallAcceptAsync(string targetId, IPEndPoint myEndpoint)
+    public async Task SendCallAcceptAsync(string targetId, IPEndPoint myEndpoint, IPEndPoint myLocalEndpoint)
     {
         await PublishMessageAsync(targetId, new SignalingMessage
         {
             Type = "CallAccept",
             CallerId = _myId,
-            Endpoint = FormatEndpoint(myEndpoint)
+            Endpoint = FormatEndpoint(myEndpoint),
+            LocalEndpoint = FormatEndpoint(myLocalEndpoint)
         });
     }
 
