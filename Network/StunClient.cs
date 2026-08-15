@@ -81,6 +81,19 @@ public static class StunClient
             udp.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
         }
 
+        if (udp.Client.AddressFamily == AddressFamily.InterNetwork && stunEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (stunEndpoint.Address.IsIPv4MappedToIPv6)
+            {
+                stunEndpoint = new IPEndPoint(stunEndpoint.Address.MapToIPv4(), stunEndpoint.Port);
+            }
+            else
+            {
+                var v4 = addresses.FirstOrDefault(a => a.AddressFamily == AddressFamily.InterNetwork);
+                if (v4 != null) stunEndpoint = new IPEndPoint(v4, stunPort);
+            }
+        }
+
         try
         {
             udp.Client.ReceiveTimeout = timeoutMs;

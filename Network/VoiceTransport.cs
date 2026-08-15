@@ -49,6 +49,16 @@ public sealed class VoiceTransport : IDisposable
     /// </summary>
     public async Task ConnectAndPunchHoleAsync(IPEndPoint remoteEndpoint)
     {
+        if (_udp.Client.AddressFamily == AddressFamily.InterNetwork && remoteEndpoint.Address.AddressFamily == AddressFamily.InterNetworkV6)
+        {
+            if (remoteEndpoint.Address.IsIPv4MappedToIPv6)
+                remoteEndpoint = new IPEndPoint(remoteEndpoint.Address.MapToIPv4(), remoteEndpoint.Port);
+        }
+        else if (_udp.Client.AddressFamily == AddressFamily.InterNetworkV6 && remoteEndpoint.Address.AddressFamily == AddressFamily.InterNetwork)
+        {
+            remoteEndpoint = new IPEndPoint(remoteEndpoint.Address.MapToIPv6(), remoteEndpoint.Port);
+        }
+        
         _remoteEndpoint = remoteEndpoint;
         _isConnected = true;
 

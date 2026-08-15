@@ -269,10 +269,6 @@ public partial class MainWindow : Window
         try
         {
             _connectedPeerId = peerId;
-            
-            // Map IPv4 to IPv6 if needed
-            if (peerEndpoint.Address.AddressFamily == AddressFamily.InterNetwork)
-                peerEndpoint = new IPEndPoint(peerEndpoint.Address.MapToIPv6(), peerEndpoint.Port);
                 
             Log($"Connecting P2P stream to {FormatEndpoint(peerEndpoint)}...");
 
