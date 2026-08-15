@@ -77,6 +77,14 @@ public partial class MainWindow : Window
                 Log($"[MQTT] {msg}");
             };
             
+            _signaling.OnAudioReceived += (data) =>
+            {
+                if (_isConnected)
+                {
+                    Dispatcher.Invoke(() => _playback?.PlayOpusFrame(data));
+                }
+            };
+            
             _signaling.OnCallRejected += (rejectorId) =>
             {
                 Dispatcher.Invoke(() => 
@@ -272,20 +280,29 @@ public partial class MainWindow : Window
         {
             _connectedPeerId = peerId;
                 
-            Log($"Connecting P2P stream to {FormatEndpoint(peerEndpoint)}...");
-
-            if (_transport != null)
-                _transport.Dispose();
-                
-            _transport = new VoiceTransport();
+            bool useRelay = ChkRelayMode.IsChecked == true;
             
-            // Wire up voice data event
-            _transport.OnFrameReceived += (data) =>
+            if (useRelay)
             {
-                _playback?.PlayOpusFrame(data);
-            };
+                Log("Using MQTT Audio Relay mode...");
+            }
+            else
+            {
+                Log($"Connecting P2P stream to {FormatEndpoint(peerEndpoint)}...");
 
-            await _transport.ConnectAndPunchHoleAsync(peerEndpoint, localEndpoint);
+                if (_transport != null)
+                    _transport.Dispose();
+                    
+                _transport = new VoiceTransport();
+                
+                // Wire up voice data event
+                _transport.OnFrameReceived += (data) =>
+                {
+                    Dispatcher.Invoke(() => _playback?.PlayOpusFrame(data));
+                };
+
+                await _transport.ConnectAndPunchHoleAsync(peerEndpoint, localEndpoint);
+            }
             
             // Start audio capture
             if (_capture == null)
@@ -293,8 +310,17 @@ public partial class MainWindow : Window
                 _capture = new AudioCapture();
                 _capture.OnFrameEncoded += async (data, length) =>
                 {
-                    if (!_isMuted && _transport != null)
-                        await _transport.SendFrameAsync(data, length);
+                    if (!_isMuted)
+                    {
+                        if (useRelay && _signaling != null && _connectedPeerId != null)
+                        {
+                            await _signaling.SendAudioAsync(_connectedPeerId, data, length);
+                        }
+                        else if (_transport != null)
+                        {
+                            await _transport.SendFrameAsync(data, length);
+                        }
+                    }
                 };
                 
                 if (CmbInputDevice.SelectedIndex >= 0)

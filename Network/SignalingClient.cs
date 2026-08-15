@@ -25,6 +25,7 @@ public class SignalingClient : IDisposable
     public event Action<string>? OnCallRejected;
     public event Action<string>? OnRemoteDisconnect;
     public event Action<string>? OnLog;
+    public event Action<byte[]>? OnAudioReceived;
 
     public string MyId => _myId;
 
@@ -50,6 +51,7 @@ public class SignalingClient : IDisposable
         
         var subscribeOptions = factory.CreateSubscribeOptionsBuilder()
             .WithTopicFilter(f => f.WithTopic($"{_baseTopic}{_myId}").WithAtLeastOnceQoS())
+            .WithTopicFilter(f => f.WithTopic($"{_baseTopic}{_myId}/audio").WithAtMostOnceQoS())
             .Build();
             
         await _mqttClient.SubscribeAsync(subscribeOptions);
@@ -60,6 +62,12 @@ public class SignalingClient : IDisposable
     {
         try
         {
+            if (e.ApplicationMessage.Topic.EndsWith("/audio"))
+            {
+                OnAudioReceived?.Invoke(e.ApplicationMessage.PayloadSegment.Array ?? Array.Empty<byte>());
+                return Task.CompletedTask;
+            }
+
             string payload = e.ApplicationMessage.ConvertPayloadToString();
             OnLog?.Invoke($"Received MQTT: {payload}");
             
@@ -173,6 +181,24 @@ public class SignalingClient : IDisposable
             .Build();
 
         await _mqttClient.PublishAsync(applicationMessage);
+    }
+
+    public async Task SendAudioAsync(string targetId, byte[] opusData, int length)
+    {
+        if (_mqttClient == null || !_mqttClient.IsConnected)
+            return;
+
+        var applicationMessage = new MqttApplicationMessageBuilder()
+            .WithTopic($"{_baseTopic}{targetId}/audio")
+            .WithPayload(new ArraySegment<byte>(opusData, 0, length))
+            .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtMostOnce)
+            .Build();
+
+        try
+        {
+            await _mqttClient.PublishAsync(applicationMessage);
+        }
+        catch { }
     }
 
     public void Dispose()

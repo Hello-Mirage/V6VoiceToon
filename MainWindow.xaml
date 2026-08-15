@@ -184,6 +184,12 @@
                                       SelectionChanged="CmbOutputDevice_SelectionChanged"/>
                         </StackPanel>
                     </Grid>
+
+                    <CheckBox x:Name="ChkRelayMode" 
+                              Content="Use MQTT Relay (Fixes strict NAT/Firewall)"
+                              Foreground="{StaticResource TextSecondaryBrush}"
+                              FontSize="10" FontFamily="Segoe UI"
+                              Margin="2,12,0,0"/>
                 </StackPanel>
             </Border>
 
