@@ -20,6 +20,9 @@ public partial class MainWindow : Window
     private bool _isMuted = false;
     private IPEndPoint? _publicEndpoint;
     private string _logText = "";
+    
+    // Remote peer that is currently calling us
+    private IPEndPoint? _incomingCaller;
 
     public MainWindow()
     {
@@ -35,12 +38,61 @@ public partial class MainWindow : Window
     {
         PopulateDevices();
         await DiscoverStunEndpointAsync();
+        
+        // Initialize the transport immediately so we can listen for incoming calls
+        InitializeTransport();
     }
 
     protected override void OnClosed(EventArgs e)
     {
-        Disconnect();
+        Disconnect(true);
         base.OnClosed(e);
+    }
+    
+    private void InitializeTransport()
+    {
+        if (_transport != null) return;
+        
+        _transport = new VoiceTransport();
+        
+        // Wire up signaling events
+        _transport.OnConnectionRequest += (callerEp) =>
+        {
+            Dispatcher.Invoke(() => HandleIncomingCall(callerEp));
+        };
+        
+        _transport.OnConnectionAccepted += () =>
+        {
+            Dispatcher.Invoke(() => CompleteConnection());
+        };
+        
+        _transport.OnConnectionRejected += () =>
+        {
+            Dispatcher.Invoke(() => 
+            {
+                Log("Connection was rejected by the remote peer.");
+                Disconnect(false);
+            });
+        };
+        
+        _transport.OnRemoteDisconnect += () =>
+        {
+            Dispatcher.Invoke(() => 
+            {
+                Log("Remote peer disconnected.");
+                Disconnect(false);
+            });
+        };
+        
+        // Wire up voice data event
+        _transport.OnFrameReceived += (data) =>
+        {
+            _playback?.PlayOpusFrame(data);
+        };
+        
+        // Start listening in the background
+        _transport.StartListening();
+        Log($"Listening for incoming calls on local port {_transport.LocalPort}...");
     }
 
     // ═══════════════════════════════════════════
@@ -109,12 +161,12 @@ public partial class MainWindow : Window
     }
 
     // ═══════════════════════════════════════════
-    //  Connect / Disconnect
+    //  Connect / Disconnect / Call Handling
     // ═══════════════════════════════════════════
 
     private async void BtnConnect_Click(object sender, RoutedEventArgs e)
     {
-        if (_isConnected)
+        if (_isConnected || _transport == null)
             return;
 
         string input = TxtPeerAddress.Text.Trim();
@@ -135,33 +187,94 @@ public partial class MainWindow : Window
         if (remoteEp.Address.AddressFamily == AddressFamily.InterNetwork)
             remoteEp = new IPEndPoint(remoteEp.Address.MapToIPv6(), remoteEp.Port);
 
-        Log($"Connecting to {FormatEndpoint(remoteEp)}...");
+        Log($"Calling {FormatEndpoint(remoteEp)}...");
+        BtnConnect.Content = "Calling...";
+        BtnConnect.IsEnabled = false;
 
         try
         {
-            // Create components
-            _transport = new VoiceTransport();
-            _capture = new AudioCapture();
-            _playback = new AudioPlayback();
-
-            // Wire pipeline
-            _capture.OnFrameEncoded += async (data, length) =>
+            await _transport.SendConnectRequestAsync(remoteEp);
+            Log("Ringing...");
+            // Now we wait for the OnConnectionAccepted event to complete the connection
+        }
+        catch (Exception ex)
+        {
+            Log($"Connection error: {ex.Message}");
+            BtnConnect.Content = "Connect";
+            BtnConnect.IsEnabled = true;
+        }
+    }
+    
+    private void HandleIncomingCall(IPEndPoint callerEp)
+    {
+        if (_isConnected)
+        {
+            // Already in a call, automatically reject new incoming calls
+            _ = _transport?.RejectConnectionAsync(callerEp);
+            Log($"Auto-rejected call from {FormatEndpoint(callerEp)} (already in call).");
+            return;
+        }
+        
+        Log($"Incoming call from {FormatEndpoint(callerEp)}...");
+        _incomingCaller = callerEp;
+        
+        // Show incoming call UI
+        TxtIncomingCaller.Text = FormatEndpoint(callerEp);
+        IncomingCallPanel.Visibility = Visibility.Visible;
+    }
+    
+    private async void BtnAcceptCall_Click(object sender, RoutedEventArgs e)
+    {
+        IncomingCallPanel.Visibility = Visibility.Collapsed;
+        
+        if (_incomingCaller != null && _transport != null)
+        {
+            Log("Accepting call...");
+            await _transport.AcceptConnectionAsync(_incomingCaller);
+            
+            // We are accepted, complete the pipeline
+            CompleteConnection();
+        }
+    }
+    
+    private async void BtnRejectCall_Click(object sender, RoutedEventArgs e)
+    {
+        IncomingCallPanel.Visibility = Visibility.Collapsed;
+        
+        if (_incomingCaller != null && _transport != null)
+        {
+            Log("Call rejected.");
+            await _transport.RejectConnectionAsync(_incomingCaller);
+        }
+        
+        _incomingCaller = null;
+    }
+    
+    private void CompleteConnection()
+    {
+        try
+        {
+            // Start audio capture
+            if (_capture == null)
             {
-                if (!_isMuted)
-                    await _transport.SendFrameAsync(data, length);
-            };
-
-            _transport.OnFrameReceived += (data) =>
+                _capture = new AudioCapture();
+                _capture.OnFrameEncoded += async (data, length) =>
+                {
+                    if (!_isMuted && _transport != null)
+                        await _transport.SendFrameAsync(data, length);
+                };
+                
+                if (CmbInputDevice.SelectedIndex >= 0)
+                    _capture.SetDevice(CmbInputDevice.SelectedIndex);
+            }
+            
+            // Start audio playback
+            if (_playback == null)
             {
-                if (data.Length <= 1) return; // Skip hole-punch
-                _playback.PlayOpusFrame(data);
-            };
-
-            // Connect
-            _transport.Connect(remoteEp);
-
-            Log("Punching NAT hole...");
-            await _transport.PunchHoleAsync();
+                _playback = new AudioPlayback();
+                if (CmbOutputDevice.SelectedIndex >= 0)
+                    _playback.SetDevice(CmbOutputDevice.SelectedIndex);
+            }
 
             _playback.Start();
             _capture.Start();
@@ -170,23 +283,29 @@ public partial class MainWindow : Window
             _isMuted = false;
 
             // Update UI
-            SetConnectionState(true, remoteEp);
-            Log($"Connected! Local port: {_transport.LocalPort}");
+            SetConnectionState(true, _transport?.RemoteEndpoint);
+            Log($"Connected!");
         }
         catch (Exception ex)
         {
-            Log($"Connection error: {ex.Message}");
-            Disconnect();
+            Log($"Failed to start audio pipeline: {ex.Message}");
+            Disconnect(true);
         }
     }
 
     private void BtnDisconnect_Click(object sender, RoutedEventArgs e)
     {
-        Disconnect();
+        Disconnect(true);
     }
 
-    private void Disconnect()
+    private void Disconnect(bool sendDisconnectSignal)
     {
+        if (sendDisconnectSignal && _transport != null)
+        {
+            // Fire and forget the disconnect signal
+            _ = _transport.SendDisconnectAsync();
+        }
+
         if (_capture != null)
         {
             try { _capture.Stop(); } catch { }
@@ -201,16 +320,16 @@ public partial class MainWindow : Window
             _playback = null;
         }
 
-        if (_transport != null)
-        {
-            try { _transport.Dispose(); } catch { }
-            _transport = null;
-        }
-
         _isConnected = false;
         _isMuted = false;
+        _incomingCaller = null;
 
-        Dispatcher.Invoke(() => SetConnectionState(false, null));
+        Dispatcher.Invoke(() => 
+        {
+            IncomingCallPanel.Visibility = Visibility.Collapsed;
+            SetConnectionState(false, null);
+        });
+        
         Log("Disconnected.");
     }
 
@@ -363,7 +482,7 @@ public partial class MainWindow : Window
 
     private void BtnClose_Click(object sender, RoutedEventArgs e)
     {
-        Disconnect();
+        Disconnect(true);
         Close();
     }
 

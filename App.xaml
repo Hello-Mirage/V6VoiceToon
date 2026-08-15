@@ -127,6 +127,13 @@
             <Setter Property="Padding" Value="10,8"/>
             <Setter Property="FontSize" Value="12"/>
             <Setter Property="FontFamily" Value="Segoe UI"/>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ComboBoxItem">
+                        <Setter Property="Foreground" Value="Black"/>
+                    </Style>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Application.Resources>
 </Application>

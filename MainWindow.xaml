@@ -261,6 +261,44 @@
                            Foreground="{StaticResource TextMutedBrush}"
                            HorizontalAlignment="Center" Margin="0,4,0,0"
                            FontFamily="Segoe UI"/>
+
+                <!-- ═══ INCOMING CALL OVERLAY ═══ -->
+                <Border x:Name="IncomingCallPanel" Grid.Row="0" Grid.RowSpan="2"
+                        Visibility="Collapsed"
+                        Background="#F0161829" CornerRadius="12"
+                        BorderBrush="{StaticResource AccentCyanBrush}" BorderThickness="1"
+                        Padding="20">
+                    <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                        <!-- Ringing icon -->
+                        <TextBlock Text="📞" FontSize="42" HorizontalAlignment="Center"
+                                   Margin="0,0,0,10"/>
+
+                        <TextBlock Text="INCOMING CALL" FontSize="13" FontWeight="Bold"
+                                   Foreground="{StaticResource AccentCyanBrush}"
+                                   HorizontalAlignment="Center" FontFamily="Segoe UI"/>
+
+                        <TextBlock x:Name="TxtIncomingCaller" Text=""
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontSize="11" FontFamily="Consolas"
+                                   HorizontalAlignment="Center" Margin="0,4,0,16"
+                                   TextTrimming="CharacterEllipsis"/>
+
+                        <!-- Accept / Reject buttons -->
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                            <Button x:Name="BtnAcceptCall" Content="✓  Accept"
+                                    Padding="20,10" Margin="0,0,8,0"
+                                    Background="{StaticResource MicActiveGradient}"
+                                    Style="{StaticResource GradientButton}"
+                                    Click="BtnAcceptCall_Click"/>
+
+                            <Button x:Name="BtnRejectCall" Content="✕  Reject"
+                                    Padding="20,10" Margin="8,0,0,0"
+                                    Background="{StaticResource DisconnectGradient}"
+                                    Style="{StaticResource GradientButton}"
+                                    Click="BtnRejectCall_Click"/>
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
             </Grid>
 
             <!-- ═══ Status Bar ═══ -->
