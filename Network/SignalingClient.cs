@@ -38,7 +38,7 @@ public class SignalingClient : IDisposable
         _mqttClient = factory.CreateMqttClient();
 
         var options = new MqttClientOptionsBuilder()
-            .WithTcpServer("test.mosquitto.org", 1883)
+            .WithTcpServer("broker.hivemq.com", 1883)
             .WithClientId($"v6voice_{Guid.NewGuid()}")
             .WithCleanSession()
             .Build();
