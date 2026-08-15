@@ -11,6 +11,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="MQTTnet" Version="4.3.3.952" />
     <PackageReference Include="NAudio" Version="2.2.*" />
     <PackageReference Include="Concentus" Version="2.2.*" />
   </ItemGroup>

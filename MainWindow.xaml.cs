@@ -14,6 +14,9 @@ public partial class MainWindow : Window
     private VoiceTransport? _transport;
     private AudioCapture? _capture;
     private AudioPlayback? _playback;
+    
+    // ─── Signaling ───
+    private SignalingClient? _signaling;
 
     // ─── State ───
     private bool _isConnected = false;
@@ -22,7 +25,11 @@ public partial class MainWindow : Window
     private string _logText = "";
     
     // Remote peer that is currently calling us
-    private IPEndPoint? _incomingCaller;
+    private string? _incomingCallerId;
+    private IPEndPoint? _incomingEndpoint;
+    
+    // The ID of the person we are currently calling/connected to
+    private string? _connectedPeerId;
 
     public MainWindow()
     {
@@ -38,61 +45,63 @@ public partial class MainWindow : Window
     {
         PopulateDevices();
         await DiscoverStunEndpointAsync();
-        
-        // Initialize the transport immediately so we can listen for incoming calls
-        InitializeTransport();
+        await ConnectSignalingAsync();
     }
 
     protected override void OnClosed(EventArgs e)
     {
         Disconnect(true);
+        _signaling?.Dispose();
         base.OnClosed(e);
     }
     
-    private void InitializeTransport()
+    private async Task ConnectSignalingAsync()
     {
-        if (_transport != null) return;
-        
-        _transport = new VoiceTransport();
-        
-        // Wire up signaling events
-        _transport.OnConnectionRequest += (callerEp) =>
+        try
         {
-            Dispatcher.Invoke(() => HandleIncomingCall(callerEp));
-        };
-        
-        _transport.OnConnectionAccepted += () =>
-        {
-            Dispatcher.Invoke(() => CompleteConnection());
-        };
-        
-        _transport.OnConnectionRejected += () =>
-        {
-            Dispatcher.Invoke(() => 
+            _signaling = new SignalingClient();
+            
+            _signaling.OnIncomingCall += (callerId, endpoint) =>
             {
-                Log("Connection was rejected by the remote peer.");
-                Disconnect(false);
-            });
-        };
-        
-        _transport.OnRemoteDisconnect += () =>
-        {
-            Dispatcher.Invoke(() => 
+                Dispatcher.Invoke(() => HandleIncomingCall(callerId, endpoint));
+            };
+            
+            _signaling.OnCallAccepted += (acceptorId, endpoint) =>
             {
-                Log("Remote peer disconnected.");
-                Disconnect(false);
-            });
-        };
-        
-        // Wire up voice data event
-        _transport.OnFrameReceived += (data) =>
+                Dispatcher.Invoke(() => CompleteConnection(acceptorId, endpoint));
+            };
+            
+            _signaling.OnCallRejected += (rejectorId) =>
+            {
+                Dispatcher.Invoke(() => 
+                {
+                    Log($"Call was rejected by {rejectorId}.");
+                    Disconnect(false);
+                });
+            };
+            
+            _signaling.OnRemoteDisconnect += (peerId) =>
+            {
+                Dispatcher.Invoke(() => 
+                {
+                    Log($"Remote peer {peerId} disconnected.");
+                    Disconnect(false);
+                });
+            };
+            
+            await _signaling.ConnectAsync();
+            
+            SetStunStatus("Online - Your ID:", FindBrush("AccentGreenBrush"));
+            TxtEndpoint.Text = _signaling.MyId;
+            StunDot.Fill = FindBrush("AccentGreenBrush");
+            Log($"Connected to signaling server. Your ID is {_signaling.MyId}");
+        }
+        catch (Exception ex)
         {
-            _playback?.PlayOpusFrame(data);
-        };
-        
-        // Start listening in the background
-        _transport.StartListening();
-        Log($"Listening for incoming calls on local port {_transport.LocalPort}...");
+            SetStunStatus("Signaling error", FindBrush("AccentRedBrush"));
+            StunDot.Fill = FindBrush("AccentRedBrush");
+            Log($"Failed to connect to signaling server: {ex.Message}");
+        }
     }
 
     // ═══════════════════════════════════════════
@@ -102,33 +111,21 @@ public partial class MainWindow : Window
     private async Task DiscoverStunEndpointAsync()
     {
         Log("Querying Google STUN server (stun.l.google.com:19302)...");
-        SetStunStatus("Discovering...", Brushes.Orange);
-
         try
         {
             _publicEndpoint = await StunClient.DiscoverPublicEndpointAsync();
 
             if (_publicEndpoint != null)
             {
-                string epStr = FormatEndpoint(_publicEndpoint);
-                SetStunStatus("Endpoint discovered", FindBrush("AccentGreenBrush"));
-                TxtEndpoint.Text = epStr;
-                BtnCopyEndpoint.Visibility = Visibility.Visible;
-                StunDot.Fill = FindBrush("AccentGreenBrush");
-                Log($"Public endpoint: {epStr}");
+                Log($"Public endpoint discovered: {FormatEndpoint(_publicEndpoint)}");
             }
             else
             {
-                SetStunStatus("STUN failed — no IPv6?", FindBrush("AccentYellowBrush"));
-                StunDot.Fill = FindBrush("AccentYellowBrush");
                 Log("STUN discovery failed. You may not have IPv6 connectivity.");
-                Log("You can still connect directly on your local network.");
             }
         }
         catch (Exception ex)
         {
-            SetStunStatus("STUN error", FindBrush("AccentRedBrush"));
-            StunDot.Fill = FindBrush("AccentRedBrush");
             Log($"STUN error: {ex.Message}");
         }
     }
@@ -166,60 +163,65 @@ public partial class MainWindow : Window
 
     private async void BtnConnect_Click(object sender, RoutedEventArgs e)
     {
-        if (_isConnected || _transport == null)
+        if (_isConnected || _signaling == null)
             return;
-
-        string input = TxtPeerAddress.Text.Trim();
-        if (string.IsNullOrEmpty(input))
+            
+        if (_publicEndpoint == null)
         {
-            Log("Please enter a peer address.");
+            Log("Cannot call: STUN endpoint not yet discovered. Wait a moment.");
             return;
         }
 
-        var remoteEp = ParseEndpoint(input);
-        if (remoteEp == null)
+        string targetId = TxtPeerAddress.Text.Trim();
+        if (string.IsNullOrEmpty(targetId) || targetId.Length < 4)
         {
-            Log($"Invalid address: {input}");
+            Log("Please enter a valid Peer ID.");
+            return;
+        }
+        
+        if (targetId == _signaling.MyId)
+        {
+            Log("You cannot call yourself.");
             return;
         }
 
-        // Map IPv4 to IPv6 if needed
-        if (remoteEp.Address.AddressFamily == AddressFamily.InterNetwork)
-            remoteEp = new IPEndPoint(remoteEp.Address.MapToIPv6(), remoteEp.Port);
-
-        Log($"Calling {FormatEndpoint(remoteEp)}...");
+        Log($"Calling ID {targetId}...");
         BtnConnect.Content = "Calling...";
         BtnConnect.IsEnabled = false;
+        
+        _connectedPeerId = targetId;
 
         try
         {
-            await _transport.SendConnectRequestAsync(remoteEp);
+            await _signaling.SendCallRequestAsync(targetId, _publicEndpoint);
             Log("Ringing...");
-            // Now we wait for the OnConnectionAccepted event to complete the connection
+            // Wait for OnCallAccepted
         }
         catch (Exception ex)
         {
-            Log($"Connection error: {ex.Message}");
+            Log($"Signaling error: {ex.Message}");
             BtnConnect.Content = "Connect";
             BtnConnect.IsEnabled = true;
         }
     }
     
-    private void HandleIncomingCall(IPEndPoint callerEp)
+    private async void HandleIncomingCall(string callerId, IPEndPoint endpoint)
     {
         if (_isConnected)
         {
-            // Already in a call, automatically reject new incoming calls
-            _ = _transport?.RejectConnectionAsync(callerEp);
-            Log($"Auto-rejected call from {FormatEndpoint(callerEp)} (already in call).");
+            // Already in a call, reject
+            if (_signaling != null)
+                await _signaling.SendCallRejectAsync(callerId);
+            Log($"Auto-rejected call from {callerId} (already in call).");
             return;
         }
         
-        Log($"Incoming call from {FormatEndpoint(callerEp)}...");
-        _incomingCaller = callerEp;
+        Log($"Incoming call from ID {callerId}...");
+        _incomingCallerId = callerId;
+        _incomingEndpoint = endpoint;
         
         // Show incoming call UI
-        TxtIncomingCaller.Text = FormatEndpoint(callerEp);
+        TxtIncomingCaller.Text = $"ID: {callerId}";
         IncomingCallPanel.Visibility = Visibility.Visible;
     }
     
@@ -227,13 +229,19 @@ public partial class MainWindow : Window
     {
         IncomingCallPanel.Visibility = Visibility.Collapsed;
         
-        if (_incomingCaller != null && _transport != null)
+        if (_incomingCallerId != null && _incomingEndpoint != null && _signaling != null && _publicEndpoint != null)
         {
-            Log("Accepting call...");
-            await _transport.AcceptConnectionAsync(_incomingCaller);
+            Log($"Accepting call from {_incomingCallerId}...");
+            _connectedPeerId = _incomingCallerId;
+            await _signaling.SendCallAcceptAsync(_incomingCallerId, _publicEndpoint);
             
-            // We are accepted, complete the pipeline
-            CompleteConnection();
+            // We are accepted, complete the pipeline with their endpoint
+            CompleteConnection(_incomingCallerId, _incomingEndpoint);
+        }
+        else
+        {
+            Log("Failed to accept call: Missing public endpoint (STUN failed).");
+            Disconnect(false);
         }
     }
     
@@ -241,19 +249,41 @@ public partial class MainWindow : Window
     {
         IncomingCallPanel.Visibility = Visibility.Collapsed;
         
-        if (_incomingCaller != null && _transport != null)
+        if (_incomingCallerId != null && _signaling != null)
         {
             Log("Call rejected.");
-            await _transport.RejectConnectionAsync(_incomingCaller);
+            await _signaling.SendCallRejectAsync(_incomingCallerId);
         }
         
-        _incomingCaller = null;
+        _incomingCallerId = null;
+        _incomingEndpoint = null;
     }
     
-    private void CompleteConnection()
+    private async void CompleteConnection(string peerId, IPEndPoint peerEndpoint)
     {
         try
         {
+            _connectedPeerId = peerId;
+            
+            // Map IPv4 to IPv6 if needed
+            if (peerEndpoint.Address.AddressFamily == AddressFamily.InterNetwork)
+                peerEndpoint = new IPEndPoint(peerEndpoint.Address.MapToIPv6(), peerEndpoint.Port);
+                
+            Log($"Connecting P2P stream to {FormatEndpoint(peerEndpoint)}...");
+
+            // Start Transport
+            if (_transport != null)
+            {
+                _transport.Dispose();
+            }
+            _transport = new VoiceTransport();
+            
+            // Wire up voice data event
+            _transport.OnFrameReceived += (data) =>
+            {
+                _playback?.PlayOpusFrame(data);
+            };
+            
             // Start audio capture
             if (_capture == null)
             {
@@ -276,6 +306,9 @@ public partial class MainWindow : Window
                     _playback.SetDevice(CmbOutputDevice.SelectedIndex);
             }
 
+            // Punch hole and connect!
+            await _transport.ConnectAndPunchHoleAsync(peerEndpoint);
+
             _playback.Start();
             _capture.Start();
 
@@ -283,8 +316,8 @@ public partial class MainWindow : Window
             _isMuted = false;
 
             // Update UI
-            SetConnectionState(true, _transport?.RemoteEndpoint);
-            Log($"Connected!");
+            SetConnectionState(true, peerId);
+            Log($"Connected! P2P Hole Punch successful.");
         }
         catch (Exception ex)
         {
@@ -300,10 +333,10 @@ public partial class MainWindow : Window
 
     private void Disconnect(bool sendDisconnectSignal)
     {
-        if (sendDisconnectSignal && _transport != null)
+        if (sendDisconnectSignal && _signaling != null && _connectedPeerId != null)
         {
             // Fire and forget the disconnect signal
-            _ = _transport.SendDisconnectAsync();
+            _ = _signaling.SendDisconnectAsync(_connectedPeerId);
         }
 
         if (_capture != null)
@@ -319,10 +352,19 @@ public partial class MainWindow : Window
             try { _playback.Dispose(); } catch { }
             _playback = null;
         }
+        
+        if (_transport != null)
+        {
+            try { _transport.Disconnect(); } catch { }
+            try { _transport.Dispose(); } catch { }
+            _transport = null;
+        }
 
         _isConnected = false;
         _isMuted = false;
-        _incomingCaller = null;
+        _incomingCallerId = null;
+        _incomingEndpoint = null;
+        _connectedPeerId = null;
 
         Dispatcher.Invoke(() => 
         {
@@ -333,7 +375,7 @@ public partial class MainWindow : Window
         Log("Disconnected.");
     }
 
-    private void SetConnectionState(bool connected, IPEndPoint? remote)
+    private void SetConnectionState(bool connected, string? peerId)
     {
         if (connected)
         {
@@ -341,7 +383,7 @@ public partial class MainWindow : Window
             ConnectionDot.Fill = FindBrush("AccentGreenBrush");
             TxtConnectionStatus.Text = "Connected";
             TxtConnectionStatus.Foreground = FindBrush("AccentGreenBrush");
-            TxtConnectionDetail.Text = remote != null ? FormatEndpoint(remote) : "";
+            TxtConnectionDetail.Text = peerId != null ? $"In call with ID {peerId}" : "";
 
             BtnConnect.Content = "Connected";
             BtnConnect.IsEnabled = false;
@@ -370,7 +412,7 @@ public partial class MainWindow : Window
             ConnectionDot.Fill = FindBrush("TextMutedBrush");
             TxtConnectionStatus.Text = "Disconnected";
             TxtConnectionStatus.Foreground = FindBrush("TextSecondaryBrush");
-            TxtConnectionDetail.Text = "Enter a peer address to connect";
+            TxtConnectionDetail.Text = "Enter a peer ID to connect";
 
             BtnConnect.Content = "Connect";
             BtnConnect.IsEnabled = true;
@@ -488,12 +530,12 @@ public partial class MainWindow : Window
 
     private void BtnCopyEndpoint_Click(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrEmpty(TxtEndpoint.Text))
+        if (!string.IsNullOrEmpty(TxtEndpoint.Text) && TxtEndpoint.Text != "---")
         {
             try
             {
                 Clipboard.SetText(TxtEndpoint.Text);
-                Log("Endpoint copied to clipboard.");
+                Log("ID copied to clipboard.");
 
                 // Visual feedback
                 BtnCopyEndpoint.Content = "✓";
@@ -547,39 +589,5 @@ public partial class MainWindow : Window
         if (ep.Address.AddressFamily == AddressFamily.InterNetworkV6)
             return $"[{ep.Address}]:{ep.Port}";
         return $"{ep.Address}:{ep.Port}";
-    }
-
-    private static IPEndPoint? ParseEndpoint(string input)
-    {
-        try
-        {
-            if (IPEndPoint.TryParse(input, out var ep))
-                return ep;
-
-            // [IPv6]:port
-            if (input.StartsWith('['))
-            {
-                int close = input.IndexOf(']');
-                if (close < 0) return null;
-                string addr = input[1..close];
-                string port = input[(close + 1)..].TrimStart(':');
-                if (IPAddress.TryParse(addr, out var a) && int.TryParse(port, out int p))
-                    return new IPEndPoint(a, p);
-            }
-            else
-            {
-                // IPv4:port
-                int lastColon = input.LastIndexOf(':');
-                if (lastColon > 0)
-                {
-                    string addr = input[..lastColon];
-                    string port = input[(lastColon + 1)..];
-                    if (IPAddress.TryParse(addr, out var a) && int.TryParse(port, out int p))
-                        return new IPEndPoint(a, p);
-                }
-            }
-        }
-        catch { }
-        return null;
     }
 }

@@ -109,22 +109,21 @@
                              VerticalAlignment="Center" Margin="0,0,10,0"/>
 
                     <StackPanel Grid.Column="1" VerticalAlignment="Center">
-                        <TextBlock x:Name="TxtStunStatus" Text="Discovering endpoint..."
+                        <TextBlock x:Name="TxtStunStatus" Text="Connecting to signaling server..."
                                    Foreground="{StaticResource TextSecondaryBrush}"
                                    FontSize="11" FontFamily="Segoe UI"/>
-                        <TextBlock x:Name="TxtEndpoint" Text=""
+                        <TextBlock x:Name="TxtEndpoint" Text="---"
                                    Foreground="{StaticResource AccentCyanBrush}"
-                                   FontSize="11" FontFamily="Consolas"
+                                   FontSize="16" FontWeight="Bold" FontFamily="Consolas"
                                    TextTrimming="CharacterEllipsis"/>
                     </StackPanel>
 
                     <Button x:Name="BtnCopyEndpoint" Grid.Column="2"
                             Content="📋" FontSize="14" Width="32" Height="32"
                             Background="Transparent" BorderThickness="0"
-                            Cursor="Hand" ToolTip="Copy endpoint to clipboard"
+                            Cursor="Hand" ToolTip="Copy ID to clipboard"
                             Foreground="{StaticResource TextMutedBrush}"
-                            Click="BtnCopyEndpoint_Click"
-                            Visibility="Collapsed"/>
+                            Click="BtnCopyEndpoint_Click"/>
                 </Grid>
             </Border>
 
@@ -133,8 +132,8 @@
                     Background="{StaticResource BgCardBrush}" CornerRadius="10"
                     BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1">
                 <StackPanel>
-                    <!-- Peer address input -->
-                    <TextBlock Text="REMOTE PEER" FontSize="10" FontWeight="Bold"
+                    <!-- Peer ID input -->
+                    <TextBlock Text="PEER ID (6 DIGITS)" FontSize="10" FontWeight="Bold"
                                Foreground="{StaticResource TextMutedBrush}"
                                Margin="2,0,0,6" FontFamily="Segoe UI"/>
                     <Grid>
@@ -145,8 +144,7 @@
 
                         <TextBox x:Name="TxtPeerAddress" Grid.Column="0"
                                  Style="{StaticResource DarkTextBox}"
-                                 Tag="[IPv6]:port or IP:port"
-                                 Text="" FontFamily="Consolas" FontSize="12"
+                                 Text="" FontFamily="Consolas" FontSize="14" FontWeight="Bold"
                                  VerticalAlignment="Center"/>
 
                         <Button x:Name="BtnConnect" Grid.Column="1" Margin="8,0,0,0"
