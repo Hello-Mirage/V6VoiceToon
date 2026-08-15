@@ -10,7 +10,7 @@ public class SignalingMessage
 {
     public string Type { get; set; } = "";
     public string CallerId { get; set; } = "";
-    public string Endpoint { get; set; } = ""; // e.g. "[2a02:1234::1]:55555"
+    public string Endpoint { get; set; } = "";
 }
 
 public class SignalingClient : IDisposable
@@ -23,12 +23,12 @@ public class SignalingClient : IDisposable
     public event Action<string, IPEndPoint>? OnCallAccepted;
     public event Action<string>? OnCallRejected;
     public event Action<string>? OnRemoteDisconnect;
+    public event Action<string>? OnLog;
 
     public string MyId => _myId;
 
     public SignalingClient()
     {
-        // Generate a random 6-digit ID
         _myId = new Random().Next(100000, 999999).ToString();
     }
 
@@ -46,7 +46,13 @@ public class SignalingClient : IDisposable
         _mqttClient.ApplicationMessageReceivedAsync += HandleIncomingMessage;
 
         await _mqttClient.ConnectAsync(options);
-        await _mqttClient.SubscribeAsync($"{_baseTopic}{_myId}");
+        
+        var subscribeOptions = factory.CreateSubscribeOptionsBuilder()
+            .WithTopicFilter(f => f.WithTopic($"{_baseTopic}{_myId}").WithAtLeastOnceQoS())
+            .Build();
+            
+        await _mqttClient.SubscribeAsync(subscribeOptions);
+        OnLog?.Invoke("Subscribed to signaling topic.");
     }
 
     private Task HandleIncomingMessage(MqttApplicationMessageReceivedEventArgs e)
@@ -54,11 +60,22 @@ public class SignalingClient : IDisposable
         try
         {
             string payload = e.ApplicationMessage.ConvertPayloadToString();
-            var msg = JsonSerializer.Deserialize<SignalingMessage>(payload);
+            OnLog?.Invoke($"Received MQTT: {payload}");
+            
+            var options = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+            var msg = JsonSerializer.Deserialize<SignalingMessage>(payload, options);
 
-            if (msg == null) return Task.CompletedTask;
+            if (msg == null)
+            {
+                OnLog?.Invoke("Failed to parse signaling message (null).");
+                return Task.CompletedTask;
+            }
 
             IPEndPoint? endpoint = ParseEndpoint(msg.Endpoint);
+            if (endpoint == null && !string.IsNullOrEmpty(msg.Endpoint))
+            {
+                OnLog?.Invoke($"Warning: Could not parse endpoint '{msg.Endpoint}'");
+            }
 
             switch (msg.Type)
             {
@@ -70,6 +87,8 @@ public class SignalingClient : IDisposable
                 case "CallAccept":
                     if (endpoint != null)
                         OnCallAccepted?.Invoke(msg.CallerId, endpoint);
+                    else
+                        OnLog?.Invoke("CallAccept ignored: Endpoint is null.");
                     break;
 
                 case "CallReject":
@@ -79,9 +98,16 @@ public class SignalingClient : IDisposable
                 case "Disconnect":
                     OnRemoteDisconnect?.Invoke(msg.CallerId);
                     break;
+                    
+                default:
+                    OnLog?.Invoke($"Unknown message type: {msg.Type}");
+                    break;
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            OnLog?.Invoke($"MQTT Parse Exception: {ex.Message}");
+        }
 
         return Task.CompletedTask;
     }
@@ -126,12 +152,19 @@ public class SignalingClient : IDisposable
 
     private async Task PublishMessageAsync(string targetId, SignalingMessage msg)
     {
-        if (_mqttClient == null || !_mqttClient.IsConnected) return;
+        if (_mqttClient == null || !_mqttClient.IsConnected)
+        {
+            OnLog?.Invoke("Cannot publish: MQTT client disconnected.");
+            return;
+        }
 
         string payload = JsonSerializer.Serialize(msg);
+        OnLog?.Invoke($"Sending MQTT to {targetId}: {payload}");
+        
         var applicationMessage = new MqttApplicationMessageBuilder()
             .WithTopic($"{_baseTopic}{targetId}")
             .WithPayload(payload)
+            .WithQualityOfServiceLevel(MQTTnet.Protocol.MqttQualityOfServiceLevel.AtLeastOnce)
             .Build();
 
         await _mqttClient.PublishAsync(applicationMessage);
@@ -146,6 +179,7 @@ public class SignalingClient : IDisposable
     {
         try
         {
+            if (string.IsNullOrEmpty(input)) return null;
             if (IPEndPoint.TryParse(input, out var ep)) return ep;
             if (input.StartsWith('['))
             {
@@ -174,6 +208,7 @@ public class SignalingClient : IDisposable
 
     private static string FormatEndpoint(IPEndPoint ep)
     {
+        if (ep == null) return "";
         if (ep.Address.AddressFamily == AddressFamily.InterNetworkV6)
             return $"[{ep.Address}]:{ep.Port}";
         return $"{ep.Address}:{ep.Port}";

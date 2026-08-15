@@ -71,6 +71,11 @@ public partial class MainWindow : Window
                 Dispatcher.Invoke(() => CompleteConnection(acceptorId, endpoint));
             };
             
+            _signaling.OnLog += (msg) => 
+            {
+                Log($"[MQTT] {msg}");
+            };
+            
             _signaling.OnCallRejected += (rejectorId) =>
             {
                 Dispatcher.Invoke(() => 
