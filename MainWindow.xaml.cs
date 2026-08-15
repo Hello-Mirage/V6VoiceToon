@@ -563,6 +563,11 @@ public partial class MainWindow : Window
     {
         LogPanel.Visibility = Visibility.Collapsed;
     }
+    
+    private void BtnLog_Click(object sender, RoutedEventArgs e)
+    {
+        LogPanel.Visibility = LogPanel.Visibility == Visibility.Visible ? Visibility.Collapsed : Visibility.Visible;
+    }
 
     // ═══════════════════════════════════════════
     //  Logging

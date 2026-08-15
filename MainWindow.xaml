@@ -63,6 +63,10 @@
                            VerticalAlignment="Center"/>
                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
                             VerticalAlignment="Center">
+                    <Button x:Name="BtnLog" Content="📝" Width="32" Height="28"
+                            Background="Transparent" Foreground="{StaticResource TextMutedBrush}"
+                            BorderThickness="0" FontSize="12" Cursor="Hand"
+                            Click="BtnLog_Click" ToolTip="Show Logs"/>
                     <Button x:Name="BtnMinimize" Content="─" Width="32" Height="28"
                             Background="Transparent" Foreground="{StaticResource TextMutedBrush}"
                             BorderThickness="0" FontSize="12" Cursor="Hand"
