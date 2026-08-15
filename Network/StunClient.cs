@@ -68,15 +68,26 @@ public static class StunClient
         Array.Copy(transactionId, 0, request, 8, 12);
 
         // Send via UDP over IPv6
-        using var udp = new UdpClient(AddressFamily.InterNetworkV6);
-        udp.Client.ReceiveTimeout = timeoutMs;
-
-        await udp.SendAsync(request, request.Length, stunEndpoint);
-
-        // Wait for response
-        using var cts = new CancellationTokenSource(timeoutMs);
+        UdpClient udp = null!;
         try
         {
+            udp = new UdpClient(AddressFamily.InterNetworkV6);
+            try { udp.Client.DualMode = true; } catch { }
+            udp.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, 0));
+        }
+        catch
+        {
+            udp = new UdpClient(AddressFamily.InterNetwork);
+            udp.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+        }
+
+        try
+        {
+            udp.Client.ReceiveTimeout = timeoutMs;
+            await udp.SendAsync(request, request.Length, stunEndpoint);
+    
+            // Wait for response
+            using var cts = new CancellationTokenSource(timeoutMs);
             var result = await udp.ReceiveAsync(cts.Token);
             return ParseBindingResponse(result.Buffer, transactionId);
         }
@@ -87,6 +98,10 @@ public static class StunClient
         catch (SocketException)
         {
             return null;
+        }
+        finally
+        {
+            udp?.Dispose();
         }
     }
 

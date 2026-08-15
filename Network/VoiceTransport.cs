@@ -29,17 +29,18 @@ public sealed class VoiceTransport : IDisposable
 
     public VoiceTransport()
     {
-        // Bind to IPv6 any address, OS-assigned port
-        _udp = new UdpClient(AddressFamily.InterNetworkV6);
-        _udp.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, 0));
-        LocalPort = ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
-
-        // Allow receiving from IPv4-mapped IPv6 addresses (dual-stack)
         try
         {
-            _udp.Client.DualMode = true;
+            _udp = new UdpClient(AddressFamily.InterNetworkV6);
+            try { _udp.Client.DualMode = true; } catch { }
+            _udp.Client.Bind(new IPEndPoint(IPAddress.IPv6Any, 0));
         }
-        catch { }
+        catch
+        {
+            _udp = new UdpClient(AddressFamily.InterNetwork);
+            _udp.Client.Bind(new IPEndPoint(IPAddress.Any, 0));
+        }
+        LocalPort = ((IPEndPoint)_udp.Client.LocalEndPoint!).Port;
     }
 
     /// <summary>
