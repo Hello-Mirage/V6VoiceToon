@@ -1,0 +1,329 @@
+<Window x:Class="V6VoiceToon.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="V6 Voice" Width="420" Height="620"
+        WindowStartupLocation="CenterScreen"
+        ResizeMode="CanMinimize"
+        Background="{StaticResource BgDarkBrush}"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        MouseLeftButtonDown="Window_MouseLeftButtonDown">
+
+    <Window.Resources>
+        <!-- Pulsing animation for mic ring -->
+        <Storyboard x:Key="PulseAnimation" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="MicPulseRing"
+                             Storyboard.TargetProperty="Opacity"
+                             From="0.6" To="0.0" Duration="0:0:1.2"/>
+            <DoubleAnimation Storyboard.TargetName="MicPulseRing"
+                             Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)"
+                             From="1.0" To="1.5" Duration="0:0:1.2"/>
+            <DoubleAnimation Storyboard.TargetName="MicPulseRing"
+                             Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)"
+                             From="1.0" To="1.5" Duration="0:0:1.2"/>
+        </Storyboard>
+
+        <!-- Level bar animation -->
+        <Storyboard x:Key="LevelAnimation" RepeatBehavior="Forever">
+            <DoubleAnimation Storyboard.TargetName="LevelBar1"
+                             Storyboard.TargetProperty="Height"
+                             From="4" To="20" Duration="0:0:0.3" AutoReverse="True"/>
+            <DoubleAnimation Storyboard.TargetName="LevelBar2"
+                             Storyboard.TargetProperty="Height"
+                             From="8" To="28" Duration="0:0:0.25" AutoReverse="True" BeginTime="0:0:0.05"/>
+            <DoubleAnimation Storyboard.TargetName="LevelBar3"
+                             Storyboard.TargetProperty="Height"
+                             From="4" To="24" Duration="0:0:0.35" AutoReverse="True" BeginTime="0:0:0.1"/>
+            <DoubleAnimation Storyboard.TargetName="LevelBar4"
+                             Storyboard.TargetProperty="Height"
+                             From="6" To="20" Duration="0:0:0.28" AutoReverse="True" BeginTime="0:0:0.15"/>
+            <DoubleAnimation Storyboard.TargetName="LevelBar5"
+                             Storyboard.TargetProperty="Height"
+                             From="4" To="16" Duration="0:0:0.32" AutoReverse="True" BeginTime="0:0:0.08"/>
+        </Storyboard>
+    </Window.Resources>
+
+    <Border CornerRadius="16" Background="{StaticResource BgDarkBrush}"
+            BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="40"/>   <!-- Title bar -->
+                <RowDefinition Height="Auto"/> <!-- Header / branding -->
+                <RowDefinition Height="Auto"/> <!-- STUN status -->
+                <RowDefinition Height="Auto"/> <!-- Connection panel -->
+                <RowDefinition Height="*"/>    <!-- Mic + visualizer -->
+                <RowDefinition Height="Auto"/> <!-- Status bar -->
+            </Grid.RowDefinitions>
+
+            <!-- ═══ Custom Title Bar ═══ -->
+            <Grid Grid.Row="0" Margin="16,8,8,0">
+                <TextBlock Text="V 6   V O I C E"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           FontSize="11" FontWeight="Bold" FontFamily="Segoe UI"
+                           VerticalAlignment="Center"/>
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Right"
+                            VerticalAlignment="Center">
+                    <Button x:Name="BtnMinimize" Content="─" Width="32" Height="28"
+                            Background="Transparent" Foreground="{StaticResource TextMutedBrush}"
+                            BorderThickness="0" FontSize="12" Cursor="Hand"
+                            Click="BtnMinimize_Click"/>
+                    <Button x:Name="BtnClose" Content="✕" Width="32" Height="28"
+                            Background="Transparent" Foreground="{StaticResource TextMutedBrush}"
+                            BorderThickness="0" FontSize="11" Cursor="Hand"
+                            Click="BtnClose_Click"/>
+                </StackPanel>
+            </Grid>
+
+            <!-- ═══ Header / Logo ═══ -->
+            <StackPanel Grid.Row="1" Margin="24,8,24,4" HorizontalAlignment="Center">
+                <TextBlock HorizontalAlignment="Center" FontSize="28" FontWeight="Bold"
+                           FontFamily="Segoe UI">
+                    <TextBlock.Foreground>
+                        <LinearGradientBrush StartPoint="0,0" EndPoint="1,0">
+                            <GradientStop Color="{StaticResource AccentCyan}" Offset="0"/>
+                            <GradientStop Color="{StaticResource AccentPurple}" Offset="0.5"/>
+                            <GradientStop Color="{StaticResource AccentPink}" Offset="1"/>
+                        </LinearGradientBrush>
+                    </TextBlock.Foreground>
+                    V6 Voice
+                </TextBlock>
+                <TextBlock Text="IPv6 Peer-to-Peer Voice Chat"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           FontSize="11" HorizontalAlignment="Center" Margin="0,2,0,0"/>
+            </StackPanel>
+
+            <!-- ═══ STUN Status Card ═══ -->
+            <Border Grid.Row="2" Margin="20,10,20,4" Padding="14,10"
+                    Background="{StaticResource BgCardBrush}" CornerRadius="10"
+                    BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <!-- Status dot -->
+                    <Ellipse x:Name="StunDot" Grid.Column="0" Width="8" Height="8"
+                             Fill="{StaticResource AccentYellowBrush}"
+                             VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock x:Name="TxtStunStatus" Text="Discovering endpoint..."
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontSize="11" FontFamily="Segoe UI"/>
+                        <TextBlock x:Name="TxtEndpoint" Text=""
+                                   Foreground="{StaticResource AccentCyanBrush}"
+                                   FontSize="11" FontFamily="Consolas"
+                                   TextTrimming="CharacterEllipsis"/>
+                    </StackPanel>
+
+                    <Button x:Name="BtnCopyEndpoint" Grid.Column="2"
+                            Content="📋" FontSize="14" Width="32" Height="32"
+                            Background="Transparent" BorderThickness="0"
+                            Cursor="Hand" ToolTip="Copy endpoint to clipboard"
+                            Foreground="{StaticResource TextMutedBrush}"
+                            Click="BtnCopyEndpoint_Click"
+                            Visibility="Collapsed"/>
+                </Grid>
+            </Border>
+
+            <!-- ═══ Connection Panel ═══ -->
+            <Border Grid.Row="3" Margin="20,8,20,4" Padding="14,12"
+                    Background="{StaticResource BgCardBrush}" CornerRadius="10"
+                    BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1">
+                <StackPanel>
+                    <!-- Peer address input -->
+                    <TextBlock Text="REMOTE PEER" FontSize="10" FontWeight="Bold"
+                               Foreground="{StaticResource TextMutedBrush}"
+                               Margin="2,0,0,6" FontFamily="Segoe UI"/>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+
+                        <TextBox x:Name="TxtPeerAddress" Grid.Column="0"
+                                 Style="{StaticResource DarkTextBox}"
+                                 Tag="[IPv6]:port or IP:port"
+                                 Text="" FontFamily="Consolas" FontSize="12"
+                                 VerticalAlignment="Center"/>
+
+                        <Button x:Name="BtnConnect" Grid.Column="1" Margin="8,0,0,0"
+                                Content="Connect" Padding="16,10"
+                                Background="{StaticResource ConnectGradient}"
+                                Style="{StaticResource GradientButton}"
+                                Click="BtnConnect_Click"/>
+                    </Grid>
+
+                    <!-- Device selectors (collapsed by default, shown in a row) -->
+                    <Grid Margin="0,10,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="8"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="INPUT" FontSize="9" FontWeight="Bold"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       Margin="2,0,0,4"/>
+                            <ComboBox x:Name="CmbInputDevice"
+                                      Style="{StaticResource DarkComboBox}"
+                                      SelectionChanged="CmbInputDevice_SelectionChanged"/>
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="OUTPUT" FontSize="9" FontWeight="Bold"
+                                       Foreground="{StaticResource TextMutedBrush}"
+                                       Margin="2,0,0,4"/>
+                            <ComboBox x:Name="CmbOutputDevice"
+                                      Style="{StaticResource DarkComboBox}"
+                                      SelectionChanged="CmbOutputDevice_SelectionChanged"/>
+                        </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- ═══ Mic Button + Visualizer ═══ -->
+            <Grid Grid.Row="4" Margin="20,8,20,8">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <!-- Centered mic button area -->
+                <Grid Grid.Row="0" HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <!-- Pulse ring (animated when speaking) -->
+                    <Ellipse x:Name="MicPulseRing" Width="130" Height="130"
+                             Stroke="{StaticResource AccentCyanBrush}" StrokeThickness="2"
+                             Opacity="0" RenderTransformOrigin="0.5,0.5"
+                             HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <Ellipse.RenderTransform>
+                            <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        </Ellipse.RenderTransform>
+                    </Ellipse>
+
+                    <!-- Mic button -->
+                    <Button x:Name="BtnMic" Width="110" Height="110"
+                            Cursor="Hand" Click="BtnMic_Click"
+                            IsEnabled="False" ToolTip="Toggle Mute">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <Grid>
+                                    <Ellipse x:Name="MicBg" Fill="{StaticResource BgCardBrush}"
+                                             Stroke="{StaticResource BorderSubtleBrush}"
+                                             StrokeThickness="2"/>
+                                    <TextBlock x:Name="MicIcon" Text="🎤" FontSize="36"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"/>
+                                </Grid>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="MicBg"
+                                                Property="Stroke"
+                                                Value="{StaticResource AccentCyanBrush}"/>
+                                    </Trigger>
+                                    <Trigger Property="IsEnabled" Value="False">
+                                        <Setter TargetName="MicBg" Property="Opacity" Value="0.4"/>
+                                        <Setter TargetName="MicIcon" Property="Opacity" Value="0.4"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
+                            </ControlTemplate>
+                        </Button.Template>
+                    </Button>
+                </Grid>
+
+                <!-- Audio level visualizer bars -->
+                <StackPanel x:Name="LevelVisualizer" Grid.Row="1"
+                            Orientation="Horizontal" HorizontalAlignment="Center"
+                            Margin="0,8,0,0" Visibility="Collapsed">
+                    <Rectangle x:Name="LevelBar1" Width="4" Height="4" RadiusX="2" RadiusY="2"
+                               Fill="{StaticResource AccentCyanBrush}" Margin="2,0"
+                               VerticalAlignment="Bottom"/>
+                    <Rectangle x:Name="LevelBar2" Width="4" Height="8" RadiusX="2" RadiusY="2"
+                               Fill="{StaticResource AccentCyanBrush}" Margin="2,0"
+                               VerticalAlignment="Bottom"/>
+                    <Rectangle x:Name="LevelBar3" Width="4" Height="4" RadiusX="2" RadiusY="2"
+                               Fill="{StaticResource AccentPurpleBrush}" Margin="2,0"
+                               VerticalAlignment="Bottom"/>
+                    <Rectangle x:Name="LevelBar4" Width="4" Height="6" RadiusX="2" RadiusY="2"
+                               Fill="{StaticResource AccentPurpleBrush}" Margin="2,0"
+                               VerticalAlignment="Bottom"/>
+                    <Rectangle x:Name="LevelBar5" Width="4" Height="4" RadiusX="2" RadiusY="2"
+                               Fill="{StaticResource AccentPinkBrush}" Margin="2,0"
+                               VerticalAlignment="Bottom"/>
+                </StackPanel>
+
+                <!-- Mute label -->
+                <TextBlock x:Name="TxtMicStatus" Grid.Row="1"
+                           Text="" FontSize="11"
+                           Foreground="{StaticResource TextMutedBrush}"
+                           HorizontalAlignment="Center" Margin="0,4,0,0"
+                           FontFamily="Segoe UI"/>
+            </Grid>
+
+            <!-- ═══ Status Bar ═══ -->
+            <Border Grid.Row="5" Margin="20,0,20,16" Padding="14,10"
+                    Background="{StaticResource BgCardBrush}" CornerRadius="10"
+                    BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+
+                    <Ellipse x:Name="ConnectionDot" Grid.Column="0"
+                             Width="8" Height="8"
+                             Fill="{StaticResource TextMutedBrush}"
+                             VerticalAlignment="Center" Margin="0,0,10,0"/>
+
+                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                        <TextBlock x:Name="TxtConnectionStatus" Text="Disconnected"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   FontSize="12" FontWeight="SemiBold" FontFamily="Segoe UI"/>
+                        <TextBlock x:Name="TxtConnectionDetail" Text="Enter a peer address to connect"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="10" FontFamily="Segoe UI"/>
+                    </StackPanel>
+
+                    <Button x:Name="BtnDisconnect" Grid.Column="2"
+                            Content="Disconnect" Padding="12,6"
+                            Background="{StaticResource DisconnectGradient}"
+                            Style="{StaticResource GradientButton}"
+                            Visibility="Collapsed" FontSize="11"
+                            Click="BtnDisconnect_Click"/>
+                </Grid>
+            </Border>
+
+            <!-- ═══ Log overlay (togglable) ═══ -->
+            <Border x:Name="LogPanel" Grid.Row="2" Grid.RowSpan="3"
+                    Margin="20,10,20,8" Padding="10"
+                    Background="#E6161829" CornerRadius="10"
+                    BorderBrush="{StaticResource BorderSubtleBrush}" BorderThickness="1"
+                    Visibility="Collapsed">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                    </Grid.RowDefinitions>
+                    <Grid Grid.Row="0" Margin="0,0,0,6">
+                        <TextBlock Text="LOG" FontSize="10" FontWeight="Bold"
+                                   Foreground="{StaticResource TextMutedBrush}"/>
+                        <Button Content="✕" HorizontalAlignment="Right"
+                                Background="Transparent" BorderThickness="0"
+                                Foreground="{StaticResource TextMutedBrush}"
+                                Cursor="Hand" FontSize="10"
+                                Click="BtnCloseLog_Click"/>
+                    </Grid>
+                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                        <TextBlock x:Name="TxtLog" Foreground="{StaticResource TextMutedBrush}"
+                                   FontSize="10" FontFamily="Consolas"
+                                   TextWrapping="Wrap"/>
+                    </ScrollViewer>
+                </Grid>
+            </Border>
+        </Grid>
+    </Border>
+</Window>
